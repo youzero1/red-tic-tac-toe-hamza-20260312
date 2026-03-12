@@ -1,0 +1,745 @@
+board[c]) {
+      return { winner: board[a] as Player, line };
+    }
+  }
+  return { winner: null, line: null };
+}
+
+export function isBoardFull(board: CellValue[]): boolean {
+  return board.every((cell) => cell !== null);
+}
+
+export function getNextPlayer(current: Player): Player {
+  return current === "X" ? "O" : "X";
+}
+
+export function createEmptyBoard(): CellValue[] {
+  return Array(9).fill(null) as CellValue[];
+}
+
+export function formatDate(dateStr: string): string {
+  const date = new Date(dateStr);
+  return date.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+</file>
+
+<file path="src/app/page.tsx">
+"use client";
+
+import { useState, useEffect, useCallback } from "react";
+import {
+  type Player,
+  type CellValue,
+  type GameStatus,
+  type WinnerResult,
+  calculateWinner,
+  isBoardFull,
+  getNextPlayer,
+  createEmptyBoard,
+  formatDate,
+} from "@/lib/game-logic";
+
+interface Stats {
+  xWins: number;
+  oWins: number;
+  draws: number;
+  total: number;
+}
+
+interface HistoryItem {
+  id: number;
+  winner: string;
+  createdAt: string;
+}
+
+export default function Home() {
+  const [board, setBoard] = useState<CellValue[]>(createEmptyBoard());
+  const [currentPlayer, setCurrentPlayer] = useState<Player>("X");
+  const [gameStatus, setGameStatus] = useState<GameStatus>("playing");
+  const [winnerInfo, setWinnerInfo] = useState<WinnerResult>({
+    winner: null,
+    line: null,
+  });
+  const [stats, setStats] = useState<Stats>({
+    xWins: 0,
+    oWins: 0,
+    draws: 0,
+    total: 0,
+  });
+  const [history, setHistory] = useState<HistoryItem[]>([]);
+  const [loadingStats, setLoadingStats] = useState(true);
+  const [savedGame, setSavedGame] = useState(false);
+
+  const fetchStats = useCallback(async () => {
+    try {
+      const res = await fetch("/api/games");
+      if (res.ok) {
+        const data = await res.json();
+        setStats(data.stats);
+        setHistory(data.history);
+      }
+    } catch (err) {
+      console.error("Failed to fetch stats:", err);
+    } finally {
+      setLoadingStats(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    fetchStats();
+  }, [fetchStats]);
+
+  const saveGameResult = useCallback(
+    async (winner: string) => {
+      try {
+        const res = await fetch("/api/games", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ winner }),
+        });
+        if (res.ok) {
+          await fetchStats();
+        }
+      } catch (err) {
+        console.error("Failed to save game result:", err);
+      }
+    },
+    [fetchStats]
+  );
+
+  const handleCellClick = useCallback(
+    (index: number) => {
+      if (board[index] || gameStatus !== "playing") return;
+
+      const newBoard = [...board];
+      newBoard[index] = currentPlayer;
+
+      const { winner, line } = calculateWinner(newBoard);
+
+      if (winner) {
+        setBoard(newBoard);
+        setWinnerInfo({ winner, line });
+        setGameStatus("won");
+        if (!savedGame) {
+          setSavedGame(true);
+          saveGameResult(winner);
+        }
+      } else if (isBoardFull(newBoard)) {
+        setBoard(newBoard);
+        setGameStatus("draw");
+        if (!savedGame) {
+          setSavedGame(true);
+          saveGameResult("Draw");
+        }
+      } else {
+        setBoard(newBoard);
+        setCurrentPlayer(getNextPlayer(currentPlayer));
+      }
+    },
+    [board, currentPlayer, gameStatus, savedGame, saveGameResult]
+  );
+
+  const handleRestart = useCallback(() => {
+    setBoard(createEmptyBoard());
+    setCurrentPlayer("X");
+    setGameStatus("playing");
+    setWinnerInfo({ winner: null, line: null });
+    setSavedGame(false);
+  }, []);
+
+  const getStatusContent = () => {
+    if (gameStatus === "won" && winnerInfo.winner) {
+      return (
+        <div className="turn-indicator">
+          <span
+            className={`turn-badge ${winnerInfo.winner.toLowerCase()}`}
+          >
+            {winnerInfo.winner}
+          </span>
+          <span
+            className={`status-text winner-${winnerInfo.winner.toLowerCase()}`}
+          >
+            Player {winnerInfo.winner} wins! 🎉
+          </span>
+        </div>
+      );
+    }
+    if (gameStatus === "draw") {
+      return (
+        <span className="status-text draw">It&apos;s a draw! 🤝</span>
+      );
+    }
+    return (
+      <div className="turn-indicator">
+        <span className={`turn-badge ${currentPlayer.toLowerCase()}`}>
+          {currentPlayer}
+        </span>
+        <span className="status-text">
+          Player {currentPlayer}&apos;s turn
+        </span>
+      </div>
+    );
+  };
+
+  return (
+    <div className="container">
+      <header className="header">
+        <h1>Tic Tac Toe</h1>
+        <p>Classic two-player strategy game</p>
+      </header>
+
+      <div className="game-layout">
+        <div className="game-section">
+          <div className="status-card">{getStatusContent()}</div>
+
+          <div className="board">
+            {board.map((cell, index) => {
+              const isWinningCell =
+                winnerInfo.line?.includes(index) ?? false;
+              const cellClass = [
+                "cell",
+                cell ? cell.toLowerCase() : "",
+                cell ? "filled" : "",
+                isWinningCell ? "winning" : "",
+                gameStatus !== "playing" && !cell ? "game-over" : "",
+              ]
+                .filter(Boolean)
+                .join(" ");
+
+              return (
+                <button
+                  key={index}
+                  className={cellClass}
+                  onClick={() => handleCellClick(index)}
+                  aria-label={`Cell ${index + 1}${
+                    cell ? `, ${cell}` : ""
+                  }`}
+                >
+                  {cell}
+                </button>
+              );
+            })}
+          </div>
+
+          <button className="restart-btn" onClick={handleRestart}>
+            ↺ Restart Game
+          </button>
+        </div>
+
+        <div className="sidebar">
+          <div className="card">
+            <h2>Scoreboard</h2>
+            {loadingStats ? (
+              <div className="loading">Loading...</div>
+            ) : (
+              <div className="scoreboard">
+                <div className="score-item">
+                  <div className="score-label">
+                    <span className="score-dot x"></span>
+                    Player X Wins
+                  </div>
+                  <span className="score-value x">{stats.xWins}</span>
+                </div>
+                <div className="score-item">
+                  <div className="score-label">
+                    <span className="score-dot o"></span>
+                    Player O Wins
+                  </div>
+                  <span className="score-value o">{stats.oWins}</span>
+                </div>
+                <div className="score-item">
+                  <div className="score-label">
+                    <span className="score-dot draw"></span>
+                    Draws
+                  </div>
+                  <span className="score-value draw">{stats.draws}</span>
+                </div>
+              </div>
+            )}
+          </div>
+
+          <div className="card">
+            <h2>Recent Games</h2>
+            {loadingStats ? (
+              <div className="loading">Loading...</div>
+            ) : history.length === 0 ? (
+              <div className="empty-history">No games played yet</div>
+            ) : (
+              <div className="history-list">
+                {history.map((item) => (
+                  <div key={item.id} className="history-item">
+                    <span
+                      className={`history-winner ${
+                        item.winner === "Draw"
+                          ? "draw"
+                          : item.winner.toLowerCase()
+                      }`}
+                    >
+                      {item.winner === "Draw"
+                        ? "Draw"
+                        : `Player ${item.winner} Won`}
+                    </span>
+                    <span className="history-date">
+                      {formatDate(item.createdAt)}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+</file>
+
+<file path="package.json">
+{
+  "name": "tic-tac-toe",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "test": "node --experimental-vm-modules node_modules/.bin/jest --forceExit"
+  },
+  "dependencies": {
+    "next": "14.2.5",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
+    "typeorm": "0.3.20",
+    "better-sqlite3": "9.6.0",
+    "reflect-metadata": "0.2.2"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "7.6.11",
+    "@types/node": "20.14.10",
+    "@types/react": "18.3.3",
+    "@types/react-dom": "18.3.0",
+    "@types/jest": "29.5.12",
+    "jest": "29.7.0",
+    "ts-jest": "29.1.5",
+    "typescript": "5.5.3"
+  }
+}
+</file>
+
+<file path="jest.config.ts">
+import type { Config } from "jest";
+
+const config: Config = {
+  preset: "ts-jest",
+  testEnvironment: "node",
+  roots: ["<rootDir>/src"],
+  testMatch: ["**/__tests__/**/*.test.ts"],
+  moduleNameMapper: {
+    "^@/(.*)$": "<rootDir>/src/$1",
+  },
+  transform: {
+    "^.+\\.ts$": [
+      "ts-jest",
+      {
+        tsconfig: "tsconfig.json",
+      },
+    ],
+  },
+};
+
+export default config;
+</file>
+
+<file path="src/__tests__/game-logic.test.ts">
+import {
+  calculateWinner,
+  isBoardFull,
+  getNextPlayer,
+  createEmptyBoard,
+  formatDate,
+  type CellValue,
+} from "@/lib/game-logic";
+
+describe("createEmptyBoard", () => {
+  it("should return an array of 9 null values", () => {
+    const board = createEmptyBoard();
+    expect(board).toHaveLength(9);
+    expect(board.every((cell) => cell === null)).toBe(true);
+  });
+});
+
+describe("calculateWinner", () => {
+  it("should return null winner for an empty board", () => {
+    const board = createEmptyBoard();
+    const result = calculateWinner(board);
+    expect(result.winner).toBeNull();
+    expect(result.line).toBeNull();
+  });
+
+  it("should detect X winning on top row", () => {
+    const board: CellValue[] = [
+      "X", "X", "X",
+      "O", "O", null,
+      null, null, null,
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBe("X");
+    expect(result.line).toEqual([0, 1, 2]);
+  });
+
+  it("should detect O winning on middle row", () => {
+    const board: CellValue[] = [
+      "X", "X", null,
+      "O", "O", "O",
+      "X", null, null,
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBe("O");
+    expect(result.line).toEqual([3, 4, 5]);
+  });
+
+  it("should detect X winning on bottom row", () => {
+    const board: CellValue[] = [
+      "O", "O", null,
+      null, "O", null,
+      "X", "X", "X",
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBe("X");
+    expect(result.line).toEqual([6, 7, 8]);
+  });
+
+  it("should detect X winning on left column", () => {
+    const board: CellValue[] = [
+      "X", "O", null,
+      "X", "O", null,
+      "X", null, null,
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBe("X");
+    expect(result.line).toEqual([0, 3, 6]);
+  });
+
+  it("should detect O winning on middle column", () => {
+    const board: CellValue[] = [
+      "X", "O", null,
+      null, "O", "X",
+      "X", "O", null,
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBe("O");
+    expect(result.line).toEqual([1, 4, 7]);
+  });
+
+  it("should detect X winning on right column", () => {
+    const board: CellValue[] = [
+      "O", null, "X",
+      null, "O", "X",
+      null, null, "X",
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBe("X");
+    expect(result.line).toEqual([2, 5, 8]);
+  });
+
+  it("should detect X winning on main diagonal", () => {
+    const board: CellValue[] = [
+      "X", "O", null,
+      null, "X", "O",
+      null, null, "X",
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBe("X");
+    expect(result.line).toEqual([0, 4, 8]);
+  });
+
+  it("should detect O winning on anti-diagonal", () => {
+    const board: CellValue[] = [
+      "X", null, "O",
+      "X", "O", null,
+      "O", null, "X",
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBe("O");
+    expect(result.line).toEqual([2, 4, 6]);
+  });
+
+  it("should return null winner when no one has won yet", () => {
+    const board: CellValue[] = [
+      "X", "O", "X",
+      "X", "O", null,
+      "O", "X", null,
+    ];
+    const result = calculateWinner(board);
+    expect(result.winner).toBeNull();
+    expect(result.line).toBeNull();
+  });
+
+  it("should return null winner for a draw board", () => {
+    const board: CellValue[] = [
+      "X", "O", "X",
+      "X", "O", "O",
+      "O", "X", "X",
+    ];
+    const result = calculateWinner(board);
+    // This particular draw board has no winner
+    expect(result.winner).toBeNull();
+    expect(result.line).toBeNull();
+  });
+});
+
+describe("isBoardFull", () => {
+  it("should return false for an empty board", () => {
+    const board = createEmptyBoard();
+    expect(isBoardFull(board)).toBe(false);
+  });
+
+  it("should return false for a partially filled board", () => {
+    const board: CellValue[] = [
+      "X", null, "O",
+      null, "X", null,
+      null, null, "O",
+    ];
+    expect(isBoardFull(board)).toBe(false);
+  });
+
+  it("should return true for a completely filled board", () => {
+    const board: CellValue[] = [
+      "X", "O", "X",
+      "X", "O", "O",
+      "O", "X", "X",
+    ];
+    expect(isBoardFull(board)).toBe(true);
+  });
+});
+
+describe("getNextPlayer", () => {
+  it("should return O when current player is X", () => {
+    expect(getNextPlayer("X")).toBe("O");
+  });
+
+  it("should return X when current player is O", () => {
+    expect(getNextPlayer("O")).toBe("X");
+  });
+});
+
+describe("formatDate", () => {
+  it("should format a date string correctly", () => {
+    const dateStr = "2024-01-15T10:30:00.000Z";
+    const formatted = formatDate(dateStr);
+    // The exact output depends on locale/timezone, but it should be a non-empty string
+    expect(typeof formatted).toBe("string");
+    expect(formatted.length).toBeGreaterThan(0);
+    // Should contain "Jan" and "15"
+    expect(formatted).toContain("Jan");
+    expect(formatted).toContain("15");
+  });
+
+  it("should handle different date strings", () => {
+    const dateStr = "2024-12-25T18:00:00.000Z";
+    const formatted = formatDate(dateStr);
+    expect(typeof formatted).toBe("string");
+    expect(formatted).toContain("Dec");
+    expect(formatted).toContain("25");
+  });
+});
+</file>
+
+<file path="src/__tests__/game-integration.test.ts">
+import {
+  calculateWinner,
+  isBoardFull,
+  getNextPlayer,
+  createEmptyBoard,
+  type CellValue,
+  type Player,
+  type GameStatus,
+} from "@/lib/game-logic";
+
+/**
+ * Simulates a game turn, returning the new game state.
+ */
+function simulateTurn(
+  board: CellValue[],
+  currentPlayer: Player,
+  index: number
+): {
+  board: CellValue[];
+  currentPlayer: Player;
+  gameStatus: GameStatus;
+  winner: Player | null;
+  winLine: number[] | null;
+} {
+  if (board[index] !== null) {
+    return {
+      board: [...board],
+      currentPlayer,
+      gameStatus: "playing",
+      winner: null,
+      winLine: null,
+    };
+  }
+
+  const newBoard = [...board];
+  newBoard[index] = currentPlayer;
+
+  const { winner, line } = calculateWinner(newBoard);
+
+  if (winner) {
+    return {
+      board: newBoard,
+      currentPlayer,
+      gameStatus: "won",
+      winner,
+      winLine: line,
+    };
+  }
+
+  if (isBoardFull(newBoard)) {
+    return {
+      board: newBoard,
+      currentPlayer,
+      gameStatus: "draw",
+      winner: null,
+      winLine: null,
+    };
+  }
+
+  return {
+    board: newBoard,
+    currentPlayer: getNextPlayer(currentPlayer),
+    gameStatus: "playing",
+    winner: null,
+    winLine: null,
+  };
+}
+
+describe("Game Integration", () => {
+  it("should play a full game where X wins", () => {
+    let board = createEmptyBoard();
+    let player: Player = "X";
+
+    // X plays 0, O plays 3, X plays 1, O plays 4, X plays 2 (top row win)
+    const moves = [0, 3, 1, 4, 2];
+    let result;
+
+    for (const move of moves) {
+      result = simulateTurn(board, player, move);
+      board = result.board;
+      player = result.currentPlayer;
+    }
+
+    expect(result!.gameStatus).toBe("won");
+    expect(result!.winner).toBe("X");
+    expect(result!.winLine).toEqual([0, 1, 2]);
+  });
+
+  it("should play a full game where O wins", () => {
+    let board = createEmptyBoard();
+    let player: Player = "X";
+
+    // X:0, O:3, X:1, O:4, X:8, O:5 (O wins middle row)
+    const moves = [0, 3, 1, 4, 8, 5];
+    let result;
+
+    for (const move of moves) {
+      result = simulateTurn(board, player, move);
+      board = result.board;
+      player = result.currentPlayer;
+    }
+
+    expect(result!.gameStatus).toBe("won");
+    expect(result!.winner).toBe("O");
+    expect(result!.winLine).toEqual([3, 4, 5]);
+  });
+
+  it("should play a full game ending in a draw", () => {
+    let board = createEmptyBoard();
+    let player: Player = "X";
+
+    // A classic draw sequence:
+    // X O X
+    // X X O
+    // O X O
+    const moves = [0, 1, 2, 5, 3, 6, 4, 8, 7];
+    let result;
+
+    for (const move of moves) {
+      result = simulateTurn(board, player, move);
+      board = result.board;
+      player = result.currentPlayer;
+    }
+
+    expect(result!.gameStatus).toBe("draw");
+    expect(result!.winner).toBeNull();
+  });
+
+  it("should not allow playing on an occupied cell", () => {
+    let board = createEmptyBoard();
+    let player: Player = "X";
+
+    // X plays at 0
+    const result1 = simulateTurn(board, player, 0);
+    board = result1.board;
+    player = result1.currentPlayer;
+
+    expect(board[0]).toBe("X");
+    expect(player).toBe("O");
+
+    // O tries to play at 0 (occupied)
+    const result2 = simulateTurn(board, player, 0);
+
+    // Board should be unchanged, player should still be O
+    expect(result2.board[0]).toBe("X");
+    expect(result2.currentPlayer).toBe("O");
+    expect(result2.gameStatus).toBe("playing");
+  });
+
+  it("should alternate players correctly", () => {
+    let board = createEmptyBoard();
+    let player: Player = "X";
+
+    const result1 = simulateTurn(board, player, 0);
+    expect(result1.currentPlayer).toBe("O");
+
+    const result2 = simulateTurn(result1.board, result1.currentPlayer, 1);
+    expect(result2.currentPlayer).toBe("X");
+
+    const result3 = simulateTurn(result2.board, result2.currentPlayer, 2);
+    expect(result3.currentPlayer).toBe("O");
+  });
+
+  it("should detect diagonal win", () => {
+    let board = createEmptyBoard();
+    let player: Player = "X";
+
+    // X:0, O:1, X:4, O:2, X:8 (main diagonal win for X)
+    const moves = [0, 1, 4, 2, 8];
+    let result;
+
+    for (const move of moves) {
+      result = simulateTurn(board, player, move);
+      board = result.board;
+      player = result.currentPlayer;
+    }
+
+    expect(result!.gameStatus).toBe("won");
+    expect(result!.winner).toBe("X");
+    expect(result!.winLine).toEqual([0, 4, 8]);
+  });
+
+  it("should detect anti-diagonal win", () => {
+    let board = createEmptyBoard();
+    let player: Player = "X";
+
+    // X:2, O:0, X:4, O:1, X:6 (anti-diagonal win for X)
+    const moves = [2, 0, 4, 1, 6];
+    let result;
+
+    for
